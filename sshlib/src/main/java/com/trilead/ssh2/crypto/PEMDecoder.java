@@ -34,6 +34,7 @@ import com.trilead.ssh2.crypto.cipher.DESede;
 import com.trilead.ssh2.packets.TypesReader;
 import com.trilead.ssh2.signature.ECDSASHA2Verify;
 import com.trilead.ssh2.signature.Ed25519Verify;
+import com.trilead.ssh2.signature.TokenRSAPrivateKey;
 import net.i2p.crypto.eddsa.EdDSAPrivateKey;
 import net.i2p.crypto.eddsa.EdDSAPublicKey;
 import net.i2p.crypto.eddsa.spec.EdDSANamedCurveTable;
@@ -54,6 +55,7 @@ public class PEMDecoder
 	public static final int PEM_DSA_PRIVATE_KEY = 2;
 	public static final int PEM_EC_PRIVATE_KEY = 3;
 	public static final int PEM_OPENSSH_PRIVATE_KEY = 4;
+	public static final int PEM_RSA_TOKEN_PRIVATE_KEY = 5;
 
 	private static final byte[] OPENSSH_V1_MAGIC = new byte[] {
 		'o', 'p', 'e', 'n', 's', 's', 'h', '-', 'k', 'e', 'y', '-', 'v', '1', '\0',
@@ -208,6 +210,12 @@ public class PEMDecoder
 				ps.pemType = PEM_OPENSSH_PRIVATE_KEY;
 				break;
 			}
+
+			if (line.startsWith("-----BEGIN RSA PUBLIC KEY-----")) {
+				endLine = "-----END RSA PUBLIC KEY-----";
+				ps.pemType = PEM_RSA_TOKEN_PRIVATE_KEY;
+				break;
+			}
 		}
 
 		while (true)
@@ -244,6 +252,12 @@ public class PEMDecoder
 			if ("DEK-Info:".equals(name))
 			{
 				ps.dekInfo = values;
+				continue;
+			}
+
+			if ("Private-Key-ID:".equals(name))
+			{
+				ps.private_key_id = values;
 				continue;
 			}
 			/* Ignore line */
@@ -617,9 +631,54 @@ public class PEMDecoder
 			return new KeyPair(pubKey, privKey);
 		}
 
+		if (ps.pemType == PEM_RSA_TOKEN_PRIVATE_KEY)
+		{
+
+			if (ps.private_key_id == null)  {
+				throw new IOException("No Private-Key-ID: line in stream.");
+			}
+			if (ps.private_key_id.length != 1)  {
+				throw new IOException("No Private-Key-ID: line in stream.");
+			}
+
+			SimpleDERReader dr = new SimpleDERReader(ps.data);
+
+			byte[] seq = dr.readSequenceAsByteArray();
+
+			if (dr.available() != 0)
+				throw new IOException("Padding in RSA PUBLIC KEY DER stream.");
+
+			dr.resetInput(seq);
+
+			BigInteger n = dr.readInt();
+			BigInteger e = dr.readInt();
+
+			RSAPublicKeySpec pubSpec = new RSAPublicKeySpec(n, e);
+
+			return generateTokenKeyPair("RSA", new TokenRSAPrivateKey(ps.private_key_id[0]), pubSpec);
+		}
+
 		throw new IOException("PEM problem: it is of unknown type");
 	}
 
+
+	private static KeyPair generateTokenKeyPair(String algorithm, PrivateKey priv_key, KeySpec pubSpec)
+			throws IOException {
+		try {
+			final KeyFactory kf = KeyFactory.getInstance(algorithm);
+			final PublicKey pubKey = kf.generatePublic(pubSpec);
+			final PrivateKey privKey = priv_key;
+			return new KeyPair(pubKey, privKey);
+		} catch (NoSuchAlgorithmException ex) {
+			IOException ioex = new IOException();
+			ioex.initCause(ex);
+			throw ioex;
+		} catch (InvalidKeySpecException ex) {
+			IOException ioex = new IOException("invalid keyspec");
+			ioex.initCause(ex);
+			throw ioex;
+		}
+	}
 	/**
 	 * Generate a {@code KeyPair} given an {@code algorithm} and {@code KeySpec}.
 	 */

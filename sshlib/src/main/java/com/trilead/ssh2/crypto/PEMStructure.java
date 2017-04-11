@@ -12,6 +12,7 @@ public class PEMStructure
 {
 	public int pemType;
 	String dekInfo[];
+	String private_key_id[];
 	String procType[];
 	public byte[] data;
 }

@@ -31,6 +31,8 @@ import com.trilead.ssh2.signature.DSASHA1Verify;
 import com.trilead.ssh2.signature.ECDSASHA2Verify;
 import com.trilead.ssh2.signature.Ed25519Verify;
 import com.trilead.ssh2.signature.RSASHA1Verify;
+import com.trilead.ssh2.signature.TokenRSAPrivateKey;
+import com.trilead.ssh2.signature.TokenRSASHA1Verify;
 import com.trilead.ssh2.transport.MessageHandler;
 import com.trilead.ssh2.transport.TransportManager;
 import net.i2p.crypto.eddsa.EdDSAPrivateKey;
@@ -238,6 +240,37 @@ public class AuthenticationManager implements MessageHandler
 				byte[] msg = tw.getBytes();
 
 				byte[] ds = RSASHA1Verify.generateSignature(msg, pk);
+
+				byte[] rsa_sig_enc = RSASHA1Verify.encodeSSHRSASignature(ds);
+
+				PacketUserauthRequestPublicKey ua = new PacketUserauthRequestPublicKey("ssh-connection", user,
+						"ssh-rsa", pk_enc, rsa_sig_enc);
+
+				tm.sendMessage(ua.getPayload());
+			}
+			else if (key instanceof TokenRSAPrivateKey)
+			{
+				TokenRSAPrivateKey pk = (TokenRSAPrivateKey) key;
+
+				byte[] pk_enc = RSASHA1Verify.encodeSSHRSAPublicKey((RSAPublicKey) pair.getPublic());
+
+				TypesWriter tw = new TypesWriter();
+				{
+					byte[] H = tm.getSessionIdentifier();
+
+					tw.writeString(H, 0, H.length);
+					tw.writeByte(Packets.SSH_MSG_USERAUTH_REQUEST);
+					tw.writeString(user);
+					tw.writeString("ssh-connection");
+					tw.writeString("publickey");
+					tw.writeBoolean(true);
+					tw.writeString("ssh-rsa");
+					tw.writeString(pk_enc, 0, pk_enc.length);
+				}
+
+				byte[] msg = tw.getBytes();
+
+				byte[] ds = TokenRSASHA1Verify.generateSignature(msg, pk);
 
 				byte[] rsa_sig_enc = RSASHA1Verify.encodeSSHRSASignature(ds);
 
